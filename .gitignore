@@ -1,0 +1,8 @@
+# Ignore build output
+/target/
+target/
+# Ignore editor files
+**/*.rs.bk
+
+# Ignore temporary files
+*.swp
