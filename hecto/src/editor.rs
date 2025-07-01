@@ -1,50 +1,63 @@
-use std::io::Error;
-
-const NAME: &str = env!("CARGO_PKG_NAME");
-const VERSION: &str = env!("CARGO_PKG_VERSION");
+use std::{env::{self}, io:: Error, panic::{set_hook, take_hook}};
 
 use crossterm::{event::{
         read, Event::{self}, KeyCode::{self}, KeyEvent, KeyModifiers
-    }};
+    },};
 
 mod terminal;
+mod view;
 
 use terminal::{Terminal, Size, Position};
-
+use view::View;
 pub struct Editor {
     should_quit: bool,
     current_pos: Position,
     terminal_size: Size,
+    view: View,
 }
 
 impl Editor {
     pub fn default() -> Self {
         Self { 
             should_quit: false, 
-            current_pos : Position{x:1, y:0},
+            current_pos : Position{x:0, y:0},
             terminal_size: Terminal::size().unwrap_or(Size { width: 80, height: 24 }),
+            view: View::default(),
         }
     }
 
-    pub fn run(&mut self) {
-        Terminal::initialize().unwrap();
-        let result = self.repl();
-        Terminal::terminate().unwrap();
-        result.unwrap();
+    pub fn new() -> Result<Self, Error>{
+        let current_hook = take_hook();
+        set_hook(Box::new(move |panic_info| {
+            let _ = Terminal::terminate();
+            current_hook(panic_info);
+        }));
+        Terminal::initialize()?;
+
+        let mut view = View::default();
+        let args: Vec<String> = env::args().collect();
+        if let Some(file_name) = args.get(1){
+            view.load(file_name);
+        } 
+        Ok(Self::default())
     }
 
-    pub fn repl(&mut self) -> Result<(), Error> {
-        loop {
-            self.refresh_screen()?;
-
+    pub fn run(&mut self){
+        loop{
+            self.refresh_screen();
             if self.should_quit {
                 break;
+            } 
+            match read(){
+                Ok(event) => self.evaluate_event(&event),
+                Err(e) => {
+                    #[cfg(debug_assertions)]
+                    {
+                        panic!("Could not read event: {e:?}");
+                    }
+                }
             }
-
-            let event = read()?;
-            self.evaluate_event(&event);
         }
-        Ok(())
     }
 
     fn evaluate_event(&mut self, event: &Event) {
@@ -66,7 +79,7 @@ impl Editor {
                         self.current_pos.y = self.current_pos.y.saturating_add(1).min(height);
                     }
                     KeyCode::Left => {
-                        if self.current_pos.x != 1 {
+                        if self.current_pos.x != 0 {
                             self.current_pos.x = self.current_pos.x.saturating_sub(1);                            
                         }
                     }
@@ -104,58 +117,22 @@ impl Editor {
         }
     }
 
-    fn draw_welcome_msg() -> Result<(), Error>{
-        let mut welcome_msg = format!("{NAME} editor -- Version {VERSION}");
-        let width = Terminal::size()?.width;
-        let len = welcome_msg.len();
-        // Allowed as padding doesn't have to be exactly in the middle
-        #[allow(clippy::integer_division)]
-        let padding = (width.saturating_sub(len)) / 2;
-        
-        let space = " ".repeat(padding.saturating_sub(1));
-        welcome_msg = format!("~{space}{welcome_msg}");
-        welcome_msg.truncate(width);
 
-        Terminal::print(&welcome_msg)?;
-    
-        Ok(())
-    }   
-
-    fn draw_empty_rows() -> Result<(), Error>{
-        Terminal::print("~")?;
-        Ok(())
+    fn refresh_screen(&mut self) {
+        let _ = Terminal::hide_cursor();
+        self.view.render();
+        let _ = Terminal::move_cursor_to(self.current_pos);
+        let _ = Terminal::show_cursor();
+        let _ = Terminal::execute();
     }
 
-    fn refresh_screen(&self) -> Result<(), Error> {
-        Terminal::hide_cursor()?;
+}
+
+impl Drop for Editor {
+    fn drop(&mut self) {
+        let _ = Terminal::terminate();
         if self.should_quit {
-            Terminal::clear_screen()?;
-            Terminal::move_cursor_to(Position{x: 0, y: 0})?;
-            Terminal::print("Goodbye !\r\n")?;
-        } else {
-            Terminal::move_cursor_to(Position{x: 0, y: 0})?;
-            Self::draw_rows()?;
+            let _ = Terminal::print("Goodbye ! \r\n");
         }
-        Terminal::move_cursor_to(self.current_pos)?;
-        Terminal::show_cursor()?;
-        Terminal::execute()?;
-        Ok(())
-    }
-
-    fn draw_rows() -> Result<(), Error> {
-        let Size{height, ..} = Terminal::size()?;
-        for current_row in 0..height {
-            Terminal::clear_line()?;
-            #[allow(clippy::integer_division)]
-            if current_row == height / 3{
-                Self::draw_welcome_msg()?;
-            } else {
-                Self::draw_empty_rows()?;
-            }
-            if current_row.saturating_add(1) < height {
-                Terminal::print("\r\n")?;
-            }
-        }
-        Ok(())
     }
 }

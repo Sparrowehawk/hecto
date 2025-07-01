@@ -1,11 +1,11 @@
 use crossterm::cursor::{Hide, MoveTo, Show};
 use crossterm::{queue, Command};
 use crossterm::style::Print;
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode, size, Clear, ClearType};
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode, size, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen};
 use std::io::{stdout, Error, Write};
-use core::fmt::Display;
 
-#[derive(Copy, Clone)]
+
+#[derive(Default, Copy, Clone)]
 pub struct Size {
     pub height: usize,
     pub width: usize,
@@ -27,6 +27,8 @@ pub struct Terminal {}
 
 impl Terminal {
     pub fn terminate() -> Result<(), Error> {
+        Self::leave_alt_screen()?;
+        Self::show_cursor()?;
         Self::execute()?;
         disable_raw_mode()?;
         Ok(())
@@ -34,11 +36,22 @@ impl Terminal {
 
     pub fn initialize() -> Result<(), Error> {
         enable_raw_mode()?;
+        Self::enter_alt_screen()?;
         Self::clear_screen()?;
         Self::move_cursor_to(Position { x: 0, y: 0 })?;
         Self::execute()?;
         Ok(())
         
+    }
+
+    fn leave_alt_screen() -> Result<(), Error>{
+        Self::queue_command(LeaveAlternateScreen)?;
+        Ok(())
+    }
+
+    fn enter_alt_screen() -> Result<(), Error>{
+        Self::queue_command(EnterAlternateScreen)?;
+        Ok(())
     }
 
     pub fn clear_screen() -> Result<(), Error> {
@@ -67,11 +80,17 @@ impl Terminal {
         Ok(())
     }
 
-    pub fn print<T: Display>(string: T) -> Result<(), Error> {
+    pub fn print(string: &str) -> Result<(), Error> {
         Self::queue_command(Print(string))?;
         Ok(())
     }
 
+    pub fn print_row(row: usize, line_text: &str) -> Result<(), Error> {
+        Self::move_cursor_to(Position { x: 0, y: row })?;
+        Self::clear_line()?;
+        Self::print(line_text)?;
+        Ok(())
+    }
 
 
     /// Returns the current size of this Terminal.
